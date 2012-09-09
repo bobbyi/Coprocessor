@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import contextlib
 import functools
 import imp
 import inspect
@@ -10,63 +11,93 @@ import sys
 PYTHON = '/home/bobby/Spatial_Pattern_Analysis/pypy-c-jit-56812-028b65a5a45f-linux64/bin/pypy'
 
 
-def create_child():
-    sock = socket()
-    sock.bind(('', 0))
-    sock.listen(1)
-    port = sock.getsockname()[1]
-    cmd = [PYTHON, __file__, str(port)]
-    env = dict(os.environ, in_subproc='TRUE')
-    proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE)
-    conn, addr = sock.accept()
-    return conn, proc
+class Module(object):
+    def __init__(self, co, mod_name):
+        self.co = co
+        self.mod_name = mod_name
 
-
-def pypy_import(mod_name):
-    mod = __import__(mod_name)
-    source_file_path = inspect.getsourcefile(mod)
-    conn, subproc = create_child()
-    conn.sendall(source_file_path + '\n')
-    ack = ''
-    while len(ack) < 2:
-        assert subproc.poll() is None, "Subprocess died"
-        ack += conn.recv(2)
-    assert ack == 'ok'
-
-
-def pypy(func):
-    if os.getenv('in_subproc'):
+    def __getattr__(self, func_name):
+        def func(*args, **kw):
+            return self.co.call_function(self.mod_name, func_name, *args, **kw)
         return func
-    source_file = inspect.getsourcefile(inspect.getmodule(func))
-    func_name = func.func_name
 
-    @functools.wraps(func)
-    def inner(*args, **kw):
-        msg = repr([source_file, func_name, args, kw])
-        conn.sendall(msg)
-        msg = conn.recv(1000)
-        conn.close()
-        retcode = proc.wait()
-        assert retcode == 0, 'Subprocess failed'
-        return eval(msg)
-    return inner
+
+class CoProcessor(object):
+    def __init__(self):
+        self.proc = self.conn = None
+
+    def start_proc(self):
+        if self.proc is not None:
+            return
+        sock = socket()
+        sock.bind(('', 0))
+        sock.listen(1)
+        port = sock.getsockname()[1]
+        cmd = [PYTHON, __file__, str(port)]
+        env = dict(os.environ, in_subproc='TRUE')
+        self.proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE)
+        self.conn, addr = sock.accept()
+
+    def connect(self, port):
+        self.conn = socket()
+        self.conn.connect(('', port))
+
+    def send(self, msg):
+        self.conn.sendall(msg + '\n')
+
+    def recv(self):
+        msg = ''
+        while not msg.endswith('\n'):
+            msg += self.conn.recv(1)
+        msg = msg[:-1]
+        if not msg:
+            raise EOFError
+        return msg
+
+    def recv_obj(self):
+        return eval(self.recv())
+
+    def send_obj(self, obj):
+        return self.send(repr(obj))
+
+    def close(self):
+        if self.proc is not None:
+            self.send('')
+            assert self.proc.wait() == 0, 'Subprocess failed'
+        if self.conn is not None:
+            self.conn.close()
+        self.conn = self.proc = None
+
+    def import_module(self, mod_name):
+        self.start_proc()
+        mod = __import__(mod_name)
+        source_file_path = inspect.getsourcefile(mod)
+        self.send(source_file_path)
+        assert self.recv() == 'ok'
+        return Module(self, mod_name)
+
+    def call_function(self, mod_name, func_name, *args, **kw):
+        self.send_obj((func_name, args, kw))
+        return self.recv_obj()
 
 
 def main():
+    co = CoProcessor()
     port = int(sys.argv[1])
-    sock = socket()
-    sock.connect(('', port))
-    source_file_path = ''
-    while not source_file_path.endswith('\n'):
-        source_file_path += sock.recv(1000)
-    source_file_path = source_file_path[:-1]
+    co.connect(port)
+    source_file_path = co.recv()
     assert os.path.exists(source_file_path), source_file_path
-    sock.sendall('ok')
+    co.send('ok')
     module = imp.load_source('magic!', source_file_path)
-    #func = getattr(module, func_name)
-    #msg = repr(func(*args, **kw))
-    #sock.sendall(msg)
-    sock.close()
+    with contextlib.closing(co):
+        while True:
+            try:
+                func_name, args, kw = co.recv_obj()
+            except EOFError:
+                return
+            func = getattr(module, func_name)
+            ret = func(*args, **kw)
+            co.send_obj(ret)
 
 
 if __name__ == '__main__':
