@@ -2,7 +2,6 @@
 import unittest
 
 import program
-import coprocesor
 
 
 class TestCoprocessor(unittest.TestCase):
