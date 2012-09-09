@@ -1,5 +1,5 @@
 import operator
-from coprocesor import pypy
+from coprocessor import pypy
 
 
 @pypy
