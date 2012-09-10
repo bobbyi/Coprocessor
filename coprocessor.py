@@ -5,10 +5,14 @@ try:
     import cPickle as pickle
 except ImportError:
     import pickle
+import atexit
+import imp
 import importlib
+import new
 import os
 from socket import socket
 import subprocess
+import threading
 
 
 PYTHON = '/usr/local/bin/pypy'
@@ -19,15 +23,59 @@ MSG_EXC = 2
 MSG_IMPORT = 3
 MSG_CALL = 4
 
+class Importer(object):
+    def find_module(self, fullname, path=None):
+        if fullname == 'pypy':
+            return self
+        if fullname.startswith('pypy.'):
+            return self
+
+    def load_module(self, fullname):
+        if fullname in sys.modules:
+            return sys.modules[fullname]
+        if fullname == 'pypy':
+            module = imp.new_module(fullname)
+        else:
+            name = fullname.replace('pypy.', '', 1)
+            co = PyPy.start()
+            module = co.import_module(name)
+        module.__loader__ = self
+        module.__file__ = __file__
+        module.__path__ = []
+        sys.modules[fullname] = module
+        return module
+
+
+class PyPy(object):
+    co = None
+    lock = threading.Lock()
+
+    @classmethod
+    def start(cls):
+        with cls.lock:
+            if PyPy.co is None:
+                PyPy.co = CoProcessor()
+                atexit.register(PyPy.stop)
+            return PyPy.co
+
+    @classmethod
+    def stop(cls):
+        with cls.lock:
+            if PyPy.co is not None:
+                PyPy.co.close()
+            PyPy.co = None
+
+
+sys.meta_path.append(Importer())
 
 class Module(object):
-    def __init__(self, co, mod_name):
-        self.co = co
+    def __init__(self, mod_name):
         self.mod_name = mod_name
 
     def __getattr__(self, func_name):
         def func(*args, **kw):
-            return self.co.call_function(self.mod_name, func_name, *args, **kw)
+            co = PyPy.start()
+            return co.call_function(self.mod_name, func_name, *args, **kw)
         return func
 
 
@@ -94,7 +142,7 @@ class CoProcessor(object):
     def send_exception(self, err):
         try:
             self.send_message(MSG_EXC, err)
-        except Unpickleable:
+        except pickle.PickleError:
             try:
                 msg = str(err)
             except Exception:
@@ -122,7 +170,7 @@ class CoProcessor(object):
         self.start_proc()
         self.send_message(MSG_IMPORT, mod_name)
         self.recv_response()
-        return Module(self, mod_name)
+        return Module(mod_name)
 
     def call_function(self, mod_name, func_name, *args, **kw):
         self.start_proc()
