@@ -17,6 +17,12 @@ class TestCoprocessor(unittest.TestCase):
         self.assertEquals(8, program.add(6, 2))
         self.assertEquals(36, program.product(6, 2, 3))
 
+    def test_import_error(self):
+        with self.assertRaises(SyntaxError):
+            self.co.import_module('doesnt_import')
+        with self.assertRaises(ImportError):
+            self.co.import_module('doesnt_exist')
+
     def test_adder(self):
         adder = self.co.import_module('adder')
         self.assertEquals(1, adder.inc())
@@ -59,13 +65,27 @@ class TestCoprocessor(unittest.TestCase):
         operator = self.co.import_module('operator')
         with self.assertRaises(ZeroDivisionError):
             operator.div(5, 0)
+        with self.assertRaises(AttributeError):
+            operator.not_an_actual_function(5, 0)
 
-    def test_unpickleable(self):
+    def test_pass_unpickleable(self):
+        functools = self.co.import_module('functools')
+        with self.assertRaises(coprocessor.Unpickleable):
+            # We try to pass a non-pickleable object (a lambda)
+            func = lambda: 3
+            functools.partial(func)
+        with self.assertRaises(coprocessor.Unpickleable):
+            # The argument we try to pass is pickleable, 
+            # but the object returned isn't
+            functools.partial(int)
+
+    def test_raise_unpickleable(self):
         program = self.co.import_module('program')
-        with self.assertRaises(coprocessor.Unpickleable):
+        with self.assertRaises(Exception):
             program.raise_unpickleable()
-        with self.assertRaises(coprocessor.Unpickleable):
+        with self.assertRaises(Exception):
             program.raise_unpickleable2()
+        self.assertEquals(36, program.product(6, 2, 3))
 
 
 if __name__ == '__main__':

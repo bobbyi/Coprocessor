@@ -5,17 +5,20 @@ try:
     import cPickle as pickle
 except ImportError:
     import pickle
+import importlib
 import os
 from socket import socket
 import subprocess
 
 
-PYTHON = '/home/bobby/Spatial_Pattern_Analysis/pypy-c-jit-56812-028b65a5a45f-linux64/bin/pypy'
+PYTHON = '/usr/local/bin/pypy'
+
 MSG_CLOSE = 0
 MSG_IMPORT = 1
 MSG_CALL = 2
 MSG_FUNC_RET = 3 
 MSG_EXC = 4
+MSG_OK = 5
 
 
 class Module(object):
@@ -89,6 +92,17 @@ class CoProcessor(object):
         msg = (message_type, args)
         self.send_obj(msg)
 
+    def send_exception(self, err):
+        try:
+            self.send_message(MSG_EXC, err)
+        except Unpickleable:
+            try:
+                msg = str(err)
+            except Exception:
+                msg = 'Failure in coprocess. Error is unpickleable.'
+            err = Exception(msg)
+            self.send_message(MSG_EXC, err)
+
     def close(self):
         if self.proc is not None:
             self.send_message(MSG_CLOSE)
@@ -100,8 +114,14 @@ class CoProcessor(object):
     def import_module(self, mod_name):
         self.start_proc()
         self.send_message(MSG_IMPORT, mod_name)
-        assert self.recv() == 'ok'
-        return Module(self, mod_name)
+        msg_type, args = self.recv_obj()
+        if msg_type == MSG_OK:
+            return Module(self, mod_name)
+        elif msg_type == MSG_EXC:
+            [exc] = args
+            raise exc
+        else:
+            raise TypeError('Unknown message type %s' % msg_type)
 
     def call_function(self, mod_name, func_name, *args, **kw):
         self.start_proc()
@@ -128,21 +148,21 @@ def main():
             return
         elif msg_type == MSG_IMPORT:
             [mod_name] = args
-            if mod_name not in sys.modules:
-                sys.modules[mod_name] = __import__(mod_name)
-            co.send('ok')
+            try:
+                importlib.import_module(mod_name)
+            except Exception as err:
+                co.send_exception(err)
+            else:
+                co.send_message(MSG_OK)
         elif msg_type == MSG_CALL:
             mod_name, func_name, args, kw = args
-            module = sys.modules[mod_name]
-            func = getattr(module, func_name)
             try:
+                module = importlib.import_module(mod_name)
+                func = getattr(module, func_name)
                 ret = func(*args, **kw)
                 co.send_message(MSG_FUNC_RET, ret)
             except Exception as err:
-                try:
-                    co.send_message(MSG_EXC, err)
-                except Unpickleable as err:
-                    co.send_message(MSG_EXC, err)
+                co.send_exception(err)
         else:
             raise TypeError('Unknown message type %s' % msg_type)
 
