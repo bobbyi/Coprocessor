@@ -8,7 +8,6 @@ except ImportError:
 import atexit
 import imp
 import importlib
-import new
 import os
 from socket import socket
 import subprocess
@@ -22,6 +21,7 @@ MSG_OK = 1
 MSG_EXC = 2
 MSG_IMPORT = 3
 MSG_CALL = 4
+
 
 class Importer(object):
     def find_module(self, fullname, path=None):
@@ -68,6 +68,7 @@ class PyPy(object):
 
 
 sys.meta_path.append(Importer())
+
 
 class Module(object):
     def __init__(self, mod_name):

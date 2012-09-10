@@ -14,7 +14,7 @@ def product(*args):
 
 
 def raise_unpickleable():
-    raise Exception(lambda : 3)
+    raise Exception(lambda: 3)
 
 
 def raise_unpickleable2():

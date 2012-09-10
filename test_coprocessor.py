@@ -81,7 +81,7 @@ class TestCoprocessor(unittest.TestCase):
             # We try to pass a non-pickleable object (a lambda)
             functools.partial(func)
         with self.assertRaises(coprocessor.Unpickleable):
-            # The argument we try to pass is pickleable, 
+            # The argument we try to pass is pickleable,
             # but the object returned isn't
             functools.partial(int)
 
