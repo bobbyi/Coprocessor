@@ -32,9 +32,12 @@ class TestCoprocessor(unittest.TestCase):
         self.assertEquals(103, sys.getrecursionlimit())
         # Python module
         linecache = self.co.import_module('linecache')
-        with open(__file__) as f:
+        this_file = __file__
+        if this_file.endswith('.pyc'):
+            this_file = this_file[:-1]
+        with open(this_file) as f:
             line = f.readlines()[2]
-        self.assertEquals(line, linecache.getline(__file__, 3))
+        self.assertEquals(line, linecache.getline(this_file, 3))
 
     def test_multiple_imports(self):
         adder = self.co.import_module('adder')
@@ -56,6 +59,13 @@ class TestCoprocessor(unittest.TestCase):
         operator = self.co.import_module('operator')
         with self.assertRaises(ZeroDivisionError):
             operator.div(5, 0)
+
+    def test_unpickleable(self):
+        program = self.co.import_module('program')
+        with self.assertRaises(coprocessor.Unpickleable):
+            program.raise_unpickleable()
+        with self.assertRaises(coprocessor.Unpickleable):
+            program.raise_unpickleable2()
 
 
 if __name__ == '__main__':
