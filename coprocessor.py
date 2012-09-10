@@ -52,18 +52,19 @@ class PyPy(object):
 
     @classmethod
     def start(cls):
-        with cls.lock:
-            if PyPy.co is None:
-                PyPy.co = CoProcessor()
-                atexit.register(PyPy.stop)
-            return PyPy.co
+        if cls.co is None:
+            with cls.lock:
+                if cls.co is None:
+                    cls.co = CoProcessor()
+                    atexit.register(cls.stop)
+        return cls.co
 
     @classmethod
     def stop(cls):
         with cls.lock:
-            if PyPy.co is not None:
-                PyPy.co.close()
-            PyPy.co = None
+            if cls.co is not None:
+                cls.co.close()
+            cls.co = None
 
 
 sys.meta_path.append(Importer())
