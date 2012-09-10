@@ -23,7 +23,7 @@ class TestCoprocessor(unittest.TestCase):
         with self.assertRaises(ImportError):
             self.co.import_module('doesnt_exist')
 
-    def test_adder(self):
+    def test_module_state(self):
         adder = self.co.import_module('adder')
         self.assertEquals(1, adder.inc())
         self.assertEquals(2, adder.inc())
